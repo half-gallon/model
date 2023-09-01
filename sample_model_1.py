@@ -32,9 +32,5 @@ print(
 ########################################################################
 
 
-dataloader, max_time_dim = load_training_data(
-    TRAIN_DATA_DIR, batch_size=len(TEST_DATA_FILES)
-)
-
-
+dataloader = load_training_data(TRAIN_DATA_DIR, batch_size=len(TEST_DATA_FILES))
 model = train_model(dataloader, num_epochs=2)
