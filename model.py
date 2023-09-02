@@ -5,7 +5,6 @@ import librosa
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 
 # -------------------------------------------
 # --------- Parameters ---------------------
@@ -101,6 +100,8 @@ class LSTMClassifier(nn.Module):
         """
         x.shape = [batch, sequence, features] = [1, 190, 13]
         y.shape = [2] ==> [percent of 0 , percent of 1]
+
+        return: Sum of prob of all classes
         """
         # print(x.shape)
         # print("conv1")
@@ -152,7 +153,6 @@ def train_and_evaluate(
     )
     model.train()
 
-    loss_function = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     for epoch in range(num_epochs):
@@ -162,20 +162,13 @@ def train_and_evaluate(
         # Looping through individual samples
         for idx in range(len(X_train_tensor)):
             model.zero_grad()
-            y_pred = model(
-                X_train_tensor[idx].unsqueeze(0), y_train_tensor[idx].unsqueeze(0)
-            )
 
-            # print("y_pred", y_pred)
-            # print(
-            #     "torch.argmax(y_train_tensor[idx].unsqueeze(0), dim=1)",
-            #     torch.argmax(y_train_tensor[idx].unsqueeze(0), dim=1),
-            # )
+            x = X_train_tensor[idx].unsqueeze(0)
+            y = y_train_tensor[idx].unsqueeze(0)
 
-            loss = loss_function(
-                y_pred,
-                1 - torch.argmax(y_train_tensor[idx].unsqueeze(0), dim=1),
-            )
+            y_pred = model(x, y)
+            loss = 1 - y_pred.sum()
+
             loss.backward()
             optimizer.step()
 
@@ -190,17 +183,28 @@ def train_and_evaluate(
     all_predictions = []
     with torch.no_grad():
         for idx in range(len(X_test_tensor)):
-            y_val_pred = model(
-                X_test_tensor[idx].unsqueeze(0),
-                y_test_tensor[idx].unsqueeze(0),
-            )
-            _, y_pred_tags = torch.max(y_val_pred, dim=1)
-            all_predictions.append(y_pred_tags.item())
+            x = X_test_tensor[idx].unsqueeze(0)
+            y = y_test_tensor[idx].unsqueeze(0)
+
+            y_val_pred = model(x, y)
+
+            y_acc = y_val_pred.sum()
+            all_predictions.append(y_acc.item())
 
         correct_pred = (torch.tensor(all_predictions) == y_test_tensor).float()
         acc = correct_pred.sum() / len(correct_pred)
 
     print(f"Validation Accuracy: {acc.item()}")
+
+    if acc.item() < 0.5:
+        print("Model is not good enough. train again")
+        return train_and_evaluate(
+            X_train_tensor,
+            y_train_tensor,
+            X_test_tensor,
+            y_test_tensor,
+            num_epochs=num_epochs,
+        )
 
     real_input_x = X_train_tensor[0].unsqueeze(0)
     real_input_y = y_train_tensor[0].unsqueeze(0)

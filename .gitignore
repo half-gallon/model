@@ -5,7 +5,7 @@ __pycache__
 kzg.srs
 model.proof
 network.ezkl
-network.onnx
+
 pk.key
 settings.json
 verif.sol
