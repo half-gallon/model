@@ -39,6 +39,7 @@ eth-utils==2.2.0
 executing==1.2.0
 ezkl==1.13.2
 fastjsonschema==2.18.0
+ffmpeg==1.4
 filelock==3.12.2
 flatbuffers==23.5.26
 fonttools==4.42.1
