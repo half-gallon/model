@@ -239,20 +239,24 @@ def train_and_evaluate(
     json.dump(data, open("input.json", "w"), indent=2)
 
 
-# Load data
-X_train, y_train = load_data_from_directory(TRAIN_DATA_DIR)
-X_test, y_test = load_data_from_directory(TEST_DATA_DIR)
+def main():
+    # Load data
+    X_train, y_train = load_data_from_directory(TRAIN_DATA_DIR)
+    X_test, y_test = load_data_from_directory(TEST_DATA_DIR)
+
+    # Convert to tensors
+
+    # Changing shape to [batch, sequence, features]
+    X_train_tensor = torch.tensor(X_train, dtype=torch.float32).permute(0, 2, 1)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.long)
+
+    # Changing shape to [batch, sequence, features]
+    X_test_tensor = torch.tensor(X_test, dtype=torch.float32).permute(0, 2, 1)
+    y_test_tensor = torch.tensor(y_test, dtype=torch.long)
+
+    # Train and evaluate
+    train_and_evaluate(X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor)
 
 
-# Convert to tensors
-
-# Changing shape to [batch, sequence, features]
-X_train_tensor = torch.tensor(X_train, dtype=torch.float32).permute(0, 2, 1)
-y_train_tensor = torch.tensor(y_train, dtype=torch.long)
-
-# Changing shape to [batch, sequence, features]
-X_test_tensor = torch.tensor(X_test, dtype=torch.float32).permute(0, 2, 1)
-y_test_tensor = torch.tensor(y_test, dtype=torch.long)
-
-# Train and evaluate
-train_and_evaluate(X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor)
+if __name__ == "__main__":
+    main()

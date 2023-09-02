@@ -1,5 +1,9 @@
 set -ex
 
+ezkl --version
+
+SOLC_VERSION="0.8.17"
+
 python model.py
 
 read -p "Continue? (Y/N): " confirm && [[ $confirm == [yY\ ] || $confirm == [yY][eE][sS] ]] || exit 1
@@ -26,5 +30,5 @@ ezkl verify --proof-path=model.proof --settings-path=settings.json --vk-path=vk.
 
 # https://docs.ezkl.xyz/verifying_on-chain/#verifying-with-the-evm-
 
-# solc@0.8.17 !
-ezkl create-evm-verifier --srs-path=kzg.srs --vk-path vk.key --sol-code-path verif.sol --settings-path=settings.json
+solc-select install $SOLC_VERSION
+SOLC_VERSION=$SOLC_VERSION ezkl create-evm-verifier --srs-path=kzg.srs --vk-path vk.key --sol-code-path verif.sol --settings-path=settings.json
