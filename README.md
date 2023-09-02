@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-./run.sh # build and train model, then export verifi.sol contract
+./run-partial.sh # with built model, export Verifier.sol contract
 ```
 
 Then run server from server repository. (link TBD)

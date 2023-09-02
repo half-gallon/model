@@ -13,8 +13,7 @@ from constant import max_pad_len, n_mfcc
 
 # -------------------------------------------
 # --------- Hyperparameters? ---------------------
-threshold_acc = 0.51
-threshold_loss = 0.5
+threshold_loss = 0.4  # train again if loss > threshold_loss
 
 num_epochs = 300
 
@@ -102,14 +101,13 @@ class LSTMClassifier(nn.Module):
         # self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, self.num_layers)
         # # Define the output layer
         # self.linear = nn.Linear(self.hidden_dim, output_dim)
-        self.softmax = nn.Softmax(dim=1)
         # self.dropout = nn.Dropout(dropout)
 
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=5, stride=4)
-        self.relu = nn.ReLU()
-        self.d1 = nn.Linear(in_features=1107, out_features=17)
-        self.d2 = nn.Linear(in_features=17, out_features=2)
-        self.sigmoid = nn.Sigmoid()
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=6, stride=2)
+        self.relu1 = nn.ReLU()
+
+        self.d1 = nn.Linear(in_features=2952, out_features=2)
+        self.softmax = nn.Softmax(dim=1)
 
         self.threshold = torch.tensor(0.5, dtype=torch.float)
 
@@ -120,30 +118,15 @@ class LSTMClassifier(nn.Module):
 
         return: Sum of prob of all classes
         """
-        # print(x.shape)
-        # print("conv1")
+
         x = self.conv1(x)
+        x = self.relu1(x)
 
-        # print(x.shape)
-        # print("relu")
-        x = self.relu(x)
-
-        # print(x.shape)
-        # print("flatten")
         x = x.flatten(start_dim=1)
 
-        # print(x.shape)
-        # print("d1")
         x = self.d1(x)
-        x = self.d2(x)
 
-        # print(x.shape)
-        # print("softmax")
-        # print(x)
         x = self.softmax(x)
-
-        # print(x.shape)
-        # print("done")
 
         return (x * y) > 0.5
 
@@ -192,11 +175,9 @@ def train_and_evaluate(
             # print("y_pred", y_pred.reshape(-1).tolist())
             # print("loss", loss.item())
 
-            is_other = y.reshape(-1).tolist()[0] is 0
-            if is_other is 0:
-                loss = loss * 0.3  # false-negative is less important
-            else:
-                loss = loss * 2  # false-positive is much important
+            is_owner = y.reshape(-1).tolist()[0] == 1
+            if is_owner:
+                loss = loss * 1.2  # false-positive is much important
 
             loss.backward()
             optimizer.step()
@@ -207,6 +188,18 @@ def train_and_evaluate(
         # Print every 10 epochs
         if epoch % 10 == 0:
             print(f"Epoch {epoch} - Training Loss: {epoch_loss / len(X_train_tensor)}")
+
+    final_loss = epoch_loss / len(X_train_tensor)
+    print(f"Training finished with loss: {final_loss}")
+    if final_loss > threshold_loss:
+        print("Model is not trained well. train again")
+        return train_and_evaluate(
+            X_train_tensor,
+            y_train_tensor,
+            X_test_tensor,
+            y_test_tensor,
+            num_epochs=ceil(num_epochs * 1.2),
+        )
 
     # Evaluation
     model.eval()
@@ -224,16 +217,6 @@ def train_and_evaluate(
         acc = 1 - correct_pred.sum() / len(all_predictions)
 
     print(f"Validation Accuracy: {acc.item()}")
-
-    if acc.item() < threshold_acc:
-        print("Model is not good enough. train again")
-        return train_and_evaluate(
-            X_train_tensor,
-            y_train_tensor,
-            X_test_tensor,
-            y_test_tensor,
-            num_epochs=ceil(num_epochs * 1.2),
-        )
 
     real_input_x = X_train_tensor[0].unsqueeze(0)
     real_input_y = y_train_tensor[0].unsqueeze(0)
