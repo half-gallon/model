@@ -1,15 +1,22 @@
 import json
+from math import ceil
 import os
+import random
 import numpy as np
 import librosa
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from constant import max_pad_len, n_mfcc
+
+
 # -------------------------------------------
-# --------- Parameters ---------------------
-max_pad_len = 190
-n_mfcc = 13
+# --------- Hyperparameters? ---------------------
+threshold_acc = 0.51
+threshold_loss = 0.5
+
+num_epochs = 300
 
 # -------------------------------------------
 # --------- Data Directory Configuration -----
@@ -25,11 +32,14 @@ def extract_mfcc(file_path, max_pad_len=max_pad_len, n_mfcc=n_mfcc):
     y, sr = librosa.load(file_path, mono=True, sr=None)
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
     pad_width = max_pad_len - mfcc.shape[1]
+    if pad_width < 0:
+        print(f"mfcc length is longer than max: {max_pad_len} < {mfcc.shape[1]}")
+        raise 1
     mfcc = np.pad(mfcc, pad_width=((0, 0), (0, pad_width)), mode="constant")
     return mfcc
 
 
-def load_data_from_directory(data_dir, max_pad_len=190, n_mfcc=13):
+def load_data_from_directory(data_dir, max_pad_len=max_pad_len, n_mfcc=13):
     """Load .wav files from a directory and extract MFCC features."""
     X = []
     y = []
@@ -66,6 +76,10 @@ def load_data_from_directory(data_dir, max_pad_len=190, n_mfcc=13):
 
 # -------------------------------------------
 # --------- LSTM Model Definition -----------
+def random_indice(size):
+    return [random.choice([j for j in range(size) if j != i]) for i in range(size)]
+
+
 class LSTMClassifier(nn.Module):
     """LSTM Classifier model."""
 
@@ -93,8 +107,11 @@ class LSTMClassifier(nn.Module):
 
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=5, stride=4)
         self.relu = nn.ReLU()
-        self.d1 = nn.Linear(in_features=141, out_features=2)
+        self.d1 = nn.Linear(in_features=1107, out_features=17)
+        self.d2 = nn.Linear(in_features=17, out_features=2)
         self.sigmoid = nn.Sigmoid()
+
+        self.threshold = torch.tensor(0.5, dtype=torch.float)
 
     def forward(self, x, y):
         """
@@ -118,6 +135,7 @@ class LSTMClassifier(nn.Module):
         # print(x.shape)
         # print("d1")
         x = self.d1(x)
+        x = self.d2(x)
 
         # print(x.shape)
         # print("softmax")
@@ -127,13 +145,13 @@ class LSTMClassifier(nn.Module):
         # print(x.shape)
         # print("done")
 
-        return x * y
+        return (x * y) > 0.5
 
 
 # -------------------------------------------
 # ------- Training & Evaluation --------------
 def train_and_evaluate(
-    X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor, num_epochs=30
+    X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor, num_epochs=num_epochs
 ):
     """Train and evaluate the LSTM model."""
     input_dim = n_mfcc  # This corresponds to n_mfcc
@@ -155,25 +173,37 @@ def train_and_evaluate(
 
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+    epoch_loss_list = []
     for epoch in range(num_epochs):
         epoch_loss = 0.0  # To accumulate loss for the entire epoch
         model.train()
 
         # Looping through individual samples
-        for idx in range(len(X_train_tensor)):
+        for idx in random_indice(len(X_train_tensor)):
             model.zero_grad()
 
             x = X_train_tensor[idx].unsqueeze(0)
             y = y_train_tensor[idx].unsqueeze(0)
 
             y_pred = model(x, y)
-            loss = 1 - y_pred.sum()
+            loss = torch.ones(1, requires_grad=True) - y_pred.long().sum()
+            # print("\n")
+            # print("y", y.reshape(-1).tolist())
+            # print("y_pred", y_pred.reshape(-1).tolist())
+            # print("loss", loss.item())
+
+            is_other = y.reshape(-1).tolist()[0] is 0
+            if is_other is 0:
+                loss = loss * 0.3  # false-negative is less important
+            else:
+                loss = loss * 2  # false-positive is much important
 
             loss.backward()
             optimizer.step()
 
             epoch_loss += loss.item()
 
+        epoch_loss_list.append(epoch_loss / len(X_train_tensor))
         # Print every 10 epochs
         if epoch % 10 == 0:
             print(f"Epoch {epoch} - Training Loss: {epoch_loss / len(X_train_tensor)}")
@@ -187,23 +217,22 @@ def train_and_evaluate(
             y = y_test_tensor[idx].unsqueeze(0)
 
             y_val_pred = model(x, y)
+            loss = torch.ones(1, requires_grad=True) - y_val_pred.long().sum()
+            all_predictions.append(loss.item())
 
-            y_acc = y_val_pred.sum()
-            all_predictions.append(y_acc.item())
-
-        correct_pred = (torch.tensor(all_predictions) == y_test_tensor).float()
-        acc = correct_pred.sum() / len(correct_pred)
+        correct_pred = (torch.tensor(all_predictions).sum()).float()
+        acc = 1 - correct_pred.sum() / len(all_predictions)
 
     print(f"Validation Accuracy: {acc.item()}")
 
-    if acc.item() < 0.5:
+    if acc.item() < threshold_acc:
         print("Model is not good enough. train again")
         return train_and_evaluate(
             X_train_tensor,
             y_train_tensor,
             X_test_tensor,
             y_test_tensor,
-            num_epochs=num_epochs,
+            num_epochs=ceil(num_epochs * 1.2),
         )
 
     real_input_x = X_train_tensor[0].unsqueeze(0)
@@ -234,9 +263,7 @@ def train_and_evaluate(
             list(real_input_y.size()),
         ],
         input_data=[d, dy],
-        output_data=[
-            ((o).detach().numpy()).reshape([-1]).tolist() for o in torch_output
-        ],
+        output_data=[torch_output.detach().reshape([-1]).tolist()],
     )
 
     # Serialize data into file:
