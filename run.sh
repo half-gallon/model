@@ -1,16 +1,20 @@
 set -ex
 
-python lstm-3.py
+python model.py
+
+read -p "Continue? (Y/N): " confirm && [[ $confirm == [yY\ ] || $confirm == [yY][eE][sS] ]] || exit 1
 
 # https://docs.ezkl.xyz/command_line_interface/
 
-ezkl gen-settings -M lstm-3.onnx
+ezkl gen-settings -M network.onnx
 
-ezkl calibrate-settings -M lstm-3.onnx -D input.json --target resources
+read -p "Continue? (Y/N): " confirm && [[ $confirm == [yY\ ] || $confirm == [yY][eE][sS] ]] || exit 1
+
+ezkl calibrate-settings -M network.onnx -D input.json --target resources
 
 ezkl get-srs -S settings.json
 
-ezkl compile-model -M lstm-3.onnx -S settings.json --compiled-model network.ezkl
+ezkl compile-model -M network.onnx -S settings.json --compiled-model network.ezkl
 
 ezkl setup -M network.ezkl --srs-path=kzg.srs --vk-path=vk.key --pk-path=pk.key --settings-path=settings.json
 

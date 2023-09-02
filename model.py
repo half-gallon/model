@@ -1,151 +1,258 @@
+import json
+import os
 import numpy as np
+import librosa
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 
-from constants import device
+# -------------------------------------------
+# --------- Parameters ---------------------
+max_pad_len = 190
+n_mfcc = 13
+
+# -------------------------------------------
+# --------- Data Directory Configuration -----
+DATA_DIR = "data"
+TRAIN_DATA_DIR = os.path.join(DATA_DIR, "train")
+TEST_DATA_DIR = os.path.join(DATA_DIR, "test")
 
 
-# Define the GRU-based neural network model
-class GRUModel(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size, num_layers=1):
-        super(GRUModel, self).__init__()
-        self.hidden_size = hidden_size
+# -------------------------------------------
+# --------- Preprocessing -------------------
+def extract_mfcc(file_path, max_pad_len=max_pad_len, n_mfcc=n_mfcc):
+    """Extract MFCC from .wav file."""
+    y, sr = librosa.load(file_path, mono=True, sr=None)
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
+    pad_width = max_pad_len - mfcc.shape[1]
+    mfcc = np.pad(mfcc, pad_width=((0, 0), (0, pad_width)), mode="constant")
+    return mfcc
+
+
+def load_data_from_directory(data_dir, max_pad_len=190, n_mfcc=13):
+    """Load .wav files from a directory and extract MFCC features."""
+    X = []
+    y = []
+
+    # find sub directory
+    sub_dirs = [
+        sub_dir
+        for sub_dir in os.listdir(data_dir)
+        if os.path.isdir(os.path.join(data_dir, sub_dir))
+    ]
+
+    print("sub_dirs", sub_dirs)
+
+    for label, sub_dir in enumerate(
+        [
+            sub_dir
+            for sub_dir in os.listdir(data_dir)
+            if os.path.isdir(os.path.join(data_dir, sub_dir))
+        ]
+    ):
+        sub_dir_path = os.path.join(data_dir, sub_dir)
+
+        if not os.path.isdir(sub_dir_path):  # Skip if not a directory
+            continue
+
+        for file_name in [f for f in os.listdir(sub_dir_path) if f.endswith(".wav")]:
+            file_path = os.path.join(sub_dir_path, file_name)
+            mfcc = extract_mfcc(file_path, max_pad_len, n_mfcc)
+            X.append(mfcc)
+            y.append([(1 if x == sub_dir else 0) for x in sub_dirs])
+
+    return np.array(X), np.array(y)
+
+
+# -------------------------------------------
+# --------- LSTM Model Definition -----------
+class LSTMClassifier(nn.Module):
+    """LSTM Classifier model."""
+
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        batch_size,
+        output_dim=2,  # number of classes
+        num_layers=2,
+        dropout=0.1,
+    ):
+        super(LSTMClassifier, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.batch_size = batch_size
         self.num_layers = num_layers
 
-        self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, output_size)
+        # # Define the LSTM layer
+        # self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, self.num_layers)
+        # # Define the output layer
+        # self.linear = nn.Linear(self.hidden_dim, output_dim)
+        self.softmax = nn.Softmax(dim=1)
+        # self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, h0=None):
-        # # # Reshape the input tensor
-        # x = x.squeeze(
-        #     1
-        # )  # Remove the channel dimension. Now the shape is [batch_size, 13, 190].
-        # x = x.transpose(
-        #     1, 2
-        # )  # Swap the last two dimensions to get shape [batch_size, 190, 13].
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=5, stride=4)
+        self.relu = nn.ReLU()
+        self.d1 = nn.Linear(in_features=141, out_features=2)
+        self.sigmoid = nn.Sigmoid()
 
-        # # Initialize hidden state
-        # h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+    def forward(self, x, y):
+        """
+        x.shape = [batch, sequence, features] = [1, 190, 13]
+        y.shape = [2] ==> [percent of 0 , percent of 1]
+        """
+        # print(x.shape)
+        # print("conv1")
+        x = self.conv1(x)
 
-        # # GRU forward pass
-        # out, _ = self.gru(x, h0)
+        # print(x.shape)
+        # print("relu")
+        x = self.relu(x)
 
-        # # Take the output from the last time step and pass it through a linear layer
-        # out = self.fc(out[:, -1, :])
+        # print(x.shape)
+        # print("flatten")
+        x = x.flatten(start_dim=1)
 
-        # return out
-        # Initialize hidden state
-        if h0 is None:
-            h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        # print(x.shape)
+        # print("d1")
+        x = self.d1(x)
 
-        # GRU forward pass
-        out, _ = self.gru(x, h0)
+        # print(x.shape)
+        # print("softmax")
+        # print(x)
+        x = self.softmax(x)
 
-        # Take the output from the last time step and pass it through a linear layer
-        out = self.fc(out[:, -1, :])
+        # print(x.shape)
+        # print("done")
 
-        return out
+        return x * y
 
 
-def train_model(
-    dataloader,
-    input_size=13,  # n_mfcc
-    hidden_size=64,
-    output_size=1,
-    num_layers=3,
-    learning_rate=0.001,
-    num_epochs=20,
+# -------------------------------------------
+# ------- Training & Evaluation --------------
+def train_and_evaluate(
+    X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor, num_epochs=30
 ):
-    """
-    Train the model with the given dataloader.
+    """Train and evaluate the LSTM model."""
+    input_dim = n_mfcc  # This corresponds to n_mfcc
+    hidden_dim = max_pad_len  # Corresponding to max_pad_len
+    batch_size = 1  # We're using individual samples
+    output_dim = len(torch.unique(y_train_tensor))  # number of classes
+    num_layers = 4
 
-    Args:
-        model (nn.Module): The model to be trained.
-        dataloader (DataLoader): DataLoader object with training data.
-        num_epochs (int): Number of epochs to train.
-        learning_rate (float): Learning rate for the optimizer.
+    print("output_dim", output_dim)
 
-    Returns:
-        model (nn.Module): The trained model.
-    """
-    model = GRUModel(input_size, hidden_size, output_size, num_layers)
-
-    # Set the model to training mode
+    model = LSTMClassifier(
+        input_dim=input_dim,
+        hidden_dim=hidden_dim,
+        batch_size=batch_size,
+        output_dim=output_dim,
+        num_layers=num_layers,
+    )
     model.train()
 
-    # Loss and optimizer
-    criterion = nn.MSELoss()  # Mean squared error
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    loss_function = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    # Train the model
     for epoch in range(num_epochs):
-        for i, batch in enumerate(dataloader):
-            # Get the input data from the batch
-            inputs = batch.squeeze(1).transpose(1, 2)
+        epoch_loss = 0.0  # To accumulate loss for the entire epoch
+        model.train()
 
-            # Zero the parameter gradients
-            optimizer.zero_grad()
-
-            # Forward pass
-            outputs = model(inputs)
-
-            # Assuming your dataset provides labels, you'd compute the loss like this:
-            # loss = criterion(outputs, labels)
-            # For the sake of this example, I'll use a dummy tensor for labels:
-            # labels = torch.Tensor(np.array([1 for _ in range(len(inputs))]))
-            labels = torch.Tensor(np.array([1 for _ in range(len(inputs))])).unsqueeze(
-                1
+        # Looping through individual samples
+        for idx in range(len(X_train_tensor)):
+            model.zero_grad()
+            y_pred = model(
+                X_train_tensor[idx].unsqueeze(0), y_train_tensor[idx].unsqueeze(0)
             )
 
-            print("len(labels)", len(labels))
+            # print("y_pred", y_pred)
+            # print(
+            #     "torch.argmax(y_train_tensor[idx].unsqueeze(0), dim=1)",
+            #     torch.argmax(y_train_tensor[idx].unsqueeze(0), dim=1),
+            # )
 
-            loss = criterion(outputs, labels)
-
-            # Backward pass and optimization
+            loss = loss_function(
+                y_pred,
+                1 - torch.argmax(y_train_tensor[idx].unsqueeze(0), dim=1),
+            )
             loss.backward()
             optimizer.step()
 
-            if epoch % 10 == 0:
-                print(
-                    f"Epoch [{epoch + 1}/{num_epochs}], Step [{i + 1}/{len(dataloader)}], Loss: {loss.item():.4f}"
-                )
-    print("Training finished!")
+            epoch_loss += loss.item()
 
-    initial_h0 = torch.zeros(num_layers, 1, hidden_size)
-    dummy_input = (torch.randn(1, 190, 13), initial_h0)
+        # Print every 10 epochs
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch} - Training Loss: {epoch_loss / len(X_train_tensor)}")
+
+    # Evaluation
+    model.eval()
+    all_predictions = []
+    with torch.no_grad():
+        for idx in range(len(X_test_tensor)):
+            y_val_pred = model(
+                X_test_tensor[idx].unsqueeze(0),
+                y_test_tensor[idx].unsqueeze(0),
+            )
+            _, y_pred_tags = torch.max(y_val_pred, dim=1)
+            all_predictions.append(y_pred_tags.item())
+
+        correct_pred = (torch.tensor(all_predictions) == y_test_tensor).float()
+        acc = correct_pred.sum() / len(correct_pred)
+
+    print(f"Validation Accuracy: {acc.item()}")
+
+    real_input_x = X_train_tensor[0].unsqueeze(0)
+    real_input_y = y_train_tensor[0].unsqueeze(0)
+    torch_output = model(real_input_x, real_input_y)
 
     torch.onnx.export(
         model,
-        dummy_input,
-        "model.onnx",
-        export_params=True,
-        opset_version=11,
-        do_constant_folding=True,
+        (real_input_x, real_input_y),
+        "network.onnx",
+        export_params=True,  # store the trained parameter weights inside the model file
+        opset_version=15,  # the ONNX version to export the model to
+        do_constant_folding=True,  # whether to execute constant folding for optimization
+        input_names=["input"],  # the model's input names
+        output_names=["output"],  # the model's output names
         dynamic_axes={
-            "input": {0: "batch_size"},  # Only the batch size is variable
+            "input": {0: "batch_size"},  # variable length axes
             "output": {0: "batch_size"},
-            "h0": {0: "num_layers", 1: "batch_size"},
         },
-        verbose=True,
-        input_names=["input", "h0"],
-        output_names=["output"],
     )
 
-    # torch.onnx.export(
-    #     model,  # model being run
-    #     torch.randn((1, 13, 190)),
-    #     "model.onnx",  # where to save the model (can be a file or file-like object)
-    #     export_params=True,  # store the trained parameter weights inside the model file
-    #     opset_version=11,  # the ONNX version to export the model to
-    #     do_constant_folding=True,  # whether to execute constant folding for optimization
-    #     dynamic_axes={
-    #         "input": {0: "batch_size", 1: "sequence_length", 2: "feature_dim"},
-    #         "output": {0: "batch_size"},
-    #     },
-    #     verbose=True,  # store the trained parameter weights inside the model file
-    #     input_names=["input"],  # specify the name of the inputs
-    #     output_names=["output"],  # specify the name of the outputs
-    # )
+    d = (real_input_x.detach().numpy()).reshape([-1]).tolist()
+    dy = (real_input_y.detach().numpy()).reshape([-1]).tolist()
 
-    return model
+    data = dict(
+        input_shapes=[
+            list(real_input_x.size()),
+            list(real_input_y.size()),
+        ],
+        input_data=[d, dy],
+        output_data=[
+            ((o).detach().numpy()).reshape([-1]).tolist() for o in torch_output
+        ],
+    )
+
+    # Serialize data into file:
+    json.dump(data, open("input.json", "w"), indent=2)
+
+
+# Load data
+X_train, y_train = load_data_from_directory(TRAIN_DATA_DIR)
+X_test, y_test = load_data_from_directory(TEST_DATA_DIR)
+
+
+# Convert to tensors
+
+# Changing shape to [batch, sequence, features]
+X_train_tensor = torch.tensor(X_train, dtype=torch.float32).permute(0, 2, 1)
+y_train_tensor = torch.tensor(y_train, dtype=torch.long)
+
+# Changing shape to [batch, sequence, features]
+X_test_tensor = torch.tensor(X_test, dtype=torch.float32).permute(0, 2, 1)
+y_test_tensor = torch.tensor(y_test, dtype=torch.long)
+
+# Train and evaluate
+train_and_evaluate(X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor)

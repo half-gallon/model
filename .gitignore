@@ -1,2 +1,14 @@
 venv
 __pycache__
+
+# ezkl outputs
+kzg.srs
+model.proof
+network.ezkl
+network.onnx
+pk.key
+settings.json
+verif.sol
+vk.key
+witness.json
+input.json
