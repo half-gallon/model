@@ -18,13 +18,9 @@ This repository implements voice classification model with torch and ezkl.
 ├── vk.key # verification key
 ```
 
-### TELL US ABOUT ANY SPECIFIC BUG OR HURDLE YOU RAN INTO WHILE BUILDING THIS PROJECT. HOW DID YOU GET OVER IT? (MARKDOWN SUPPORTED)
-
-We tried to implement the model with RNN (LSTM, GRU), but ezkl@1.13.2 does not seem to fully support such networks for classification. Alternatively, CNN and linear networks were used for simple implementations.
-
 ### Caveat
 
-As the model and training dataset is not enough to provide accurecy.
+This model is not that accurate becuase of simplified model implementation (due to ezkl proving limitation) and small training data set.
 
 ## Requirement
 
