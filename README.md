@@ -69,3 +69,6 @@ This generates Verifier.sol file with a error.
 # run
 ./run.sh
 ```
+
+**3. start api server**
+See more https://github.com/half-gallon/server
