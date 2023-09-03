@@ -1,10 +1,6 @@
 set -ex
 
-ezkl --version
-
 export SOLC_VERSION="0.8.17"
-
-python model.py
 
 # read -p "Continue? (Y/N): " confirm && [[ $confirm == [yY\ ] || $confirm == [yY][eE][sS] ]] || exit 1
 
