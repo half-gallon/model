@@ -60,7 +60,7 @@ python model_complex.py
 
 **2. compile model**
 
-| This generates Verifier.sol file with a error.
+> This generates Verifier.sol file with a error.
 
 ```bash
 # compile .onnx file to circuit and verifier contract
