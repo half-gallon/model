@@ -26,7 +26,7 @@ This model is not that accurate becuase of simplified model implementation (due 
 
 - ezkl@1.13.2
 - solc-select
-- python
+- python@3.11.5
 
 ## Install
 
@@ -51,18 +51,19 @@ pip install -r requirements.txt
 **1. export model**
 
 ```bash
-# export simple model to onnx
+# export simple model to .onnx file
 python model.py
 
-# export complex model to onnx
+# or export complex model to .onnx file
 python model_complex.py
 ```
 
 **2. compile model**
-This generates Verifier.sol file with a error.
+
+| This generates Verifier.sol file with a error.
 
 ```bash
-# run
+# compile .onnx file to circuit and verifier contract
 ./run.sh
 ```
 
